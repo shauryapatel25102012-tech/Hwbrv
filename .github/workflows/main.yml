@@ -1,0 +1,52 @@
+name: Tailscale SSH Runner
+
+on:
+  workflow_dispatch:
+
+jobs:
+  connect-tailscale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Install Tailscale
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+
+      - name: Fix SSH Permissions and Configuration
+        run: |
+          # 1. Ensure sshd is installed and running
+          sudo apt-get update && sudo apt-get install -y openssh-server
+          sudo systemctl enable --now ssh
+
+          # 2. Fix runner user password to allow standard password auth if needed
+          echo "runner:runner" | sudo chpasswd
+          echo "root:root" | sudo chpasswd
+
+          # 3. Configure sshd to permit PasswordAuthentication and root login
+          sudo sed -i 's/^#*PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+          sudo sed -i 's/^#*PermitRootLogin .*/PermitRootLogin yes/' /etc/ssh/sshd_config
+          sudo systemctl restart ssh
+
+          # 4. Set correct directory permissions on authorized keys
+          mkdir -p /home/runner/.ssh
+          chmod 700 /home/runner/.ssh
+          touch /home/runner/.ssh/authorized_keys
+          chmod 600 /home/runner/.ssh/authorized_keys
+          chown -R runner:runner /home/runner/.ssh
+
+      - name: Start Tailscale & Output Login Link
+        run: |
+          # Start tailscaled daemon in the background
+          sudo tailscaled --tun=userspace-networking --socks5-server=localhost:1055 &
+          sleep 3
+
+          # Start Tailscale with SSH enabled (prints interactive login URL directly to logs)
+          sudo tailscale up --ssh --qr
+
+      - name: Keep Runner Alive
+        run: |
+          echo "Tailscale is connected with SSH enabled."
+          echo "Connect via: ssh runner@<tailscale-machine-name-or-ip>"
+          echo "Sleeping for 6 hours (21600 seconds)..."
+          sleep 21600
+          
